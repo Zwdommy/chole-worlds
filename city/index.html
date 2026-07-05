@@ -43,6 +43,59 @@
   #title-card h1 { margin: 0; font-size: 20px; letter-spacing: 3px; color: #b56576; }
   #title-card p  { margin: 2px 0 0; font-size: 11px; letter-spacing: 2px; opacity: .7; }
 
+  /* ---------- 任务卡 ---------- */
+  #quest-card {
+    top: 96px; left: 22px; max-width: 240px;
+    background: rgba(255, 252, 246, .78); backdrop-filter: blur(6px);
+    border-radius: 14px; padding: 10px 14px;
+    box-shadow: 0 4px 18px rgba(180, 140, 120, .18);
+    border-left: 3px solid #e0a458;
+    transition: opacity .6s ease;
+  }
+  #quest-card .chapter { font-size: 10.5px; letter-spacing: 2px; color: #b56576; opacity: .85; }
+  #quest-card .qtitle { font-size: 15px; font-weight: 600; margin: 2px 0; color: #7a5c68; }
+  #quest-card .obj { font-size: 12px; opacity: .8; line-height: 1.5; }
+  #quest-card .prog { font-size: 12px; color: #e0a458; font-weight: 600; margin-top: 2px; }
+  #quest-card.done { opacity: 0; }
+
+  /* ---------- 时间牌 ---------- */
+  #time-chip {
+    top: 18px; left: 50%; transform: translateX(-50%);
+    background: rgba(255, 252, 246, .72); backdrop-filter: blur(6px);
+    border-radius: 999px; padding: 8px 16px; font-size: 13px; letter-spacing: 2px;
+    box-shadow: 0 4px 18px rgba(180, 140, 120, .18);
+  }
+
+  /* ---------- 幸福度 ---------- */
+  #happy-meter {
+    top: 64px; right: 20px; display: flex; align-items: center; gap: 7px;
+    background: rgba(255, 252, 246, .72); backdrop-filter: blur(6px);
+    border-radius: 999px; padding: 7px 14px;
+    box-shadow: 0 4px 18px rgba(180, 140, 120, .18);
+    font-size: 12.5px;
+  }
+  #happy-bar {
+    width: 90px; height: 8px; border-radius: 99px; overflow: hidden;
+    background: rgba(181, 101, 118, .15);
+  }
+  #happy-fill {
+    height: 100%; width: 0%; border-radius: 99px;
+    background: linear-gradient(90deg, #ffaaa5, #ffd166, #ff8fab);
+    transition: width .8s ease;
+  }
+  #happy-val { color: #b56576; font-weight: 600; min-width: 20px; }
+
+  /* ---------- 剧情对话（Chole 之声） ---------- */
+  #toast.story {
+    border-color: rgba(255, 143, 171, .65);
+    background: linear-gradient(180deg, rgba(255, 250, 243, .96), rgba(255, 240, 246, .94));
+    box-shadow: 0 10px 40px rgba(255, 143, 171, .3);
+  }
+  #toast .speaker {
+    display: block; font-size: 12px; letter-spacing: 3px; color: #ff8fab;
+    margin-bottom: 3px; font-weight: 600;
+  }
+
   #orb-counter {
     top: 18px; right: 74px;
     background: rgba(255, 252, 246, .72); backdrop-filter: blur(6px);
@@ -109,10 +162,16 @@
     #title-card { padding: 7px 12px; }
     #title-card h1 { font-size: 15px; letter-spacing: 2px; }
     #title-card p { font-size: 9px; }
-    #orb-counter { padding: 7px 12px; font-size: 12px; right: 62px; }
+    #orb-counter { padding: 7px 12px; font-size: 12px; right: 62px; top: 64px; }
     #mute-btn { width: 36px; height: 36px; font-size: 15px; }
     #toast { bottom: 175px; font-size: 14px; padding: 10px 18px; }
     #loading h1 { font-size: 24px; }
+    #time-chip { top: auto; bottom: 165px; padding: 5px 12px; font-size: 11px; opacity: .9; }
+    #happy-meter { top: 104px; padding: 5px 10px; font-size: 11px; }
+    #happy-bar { width: 56px; }
+    #quest-card { top: 72px; max-width: 175px; padding: 8px 10px; }
+    #quest-card .qtitle { font-size: 13px; }
+    #quest-card .obj { font-size: 10.5px; }
   }
 </style>
 </head>
@@ -131,6 +190,14 @@
     <p>造物主 CHOLE 的城市</p>
   </div>
   <div id="orb-counter" class="hud">✨ 光之祝福 <b id="orb-count">0</b> / <span id="orb-total">12</span></div>
+  <div id="time-chip" class="hud">🌅 黎明</div>
+  <div id="happy-meter" class="hud">🌸<div id="happy-bar"><div id="happy-fill"></div></div><span id="happy-val">0</span></div>
+  <div id="quest-card" class="hud" style="display:none">
+    <div class="chapter" id="quest-chapter"></div>
+    <div class="qtitle" id="quest-title"></div>
+    <div class="obj" id="quest-obj"></div>
+    <div class="prog" id="quest-prog"></div>
+  </div>
   <div id="hint" class="hud">WASD 移动 · 空格 跳跃 · 拖动鼠标 转动视角 · 靠近光球收下 Chole 的祝福</div>
   <div id="toast" class="hud"></div>
   <button id="mute-btn" title="静音 / 取消静音">🔊</button>
