@@ -114,6 +114,14 @@ if (IS_TOUCH) {
   if (loadingPs[1]) loadingPs[1].textContent = '左摇杆移动 · 右侧拖动转视角 · ⬆ 跳跃';
 }
 
+// ---------- 设置 & 存档（本地持久化，为 Steam 云存档预留结构） ----------
+const SETTINGS_KEY = 'chole-city-settings';
+const SAVE_KEY = 'chole-city-save-v1';
+const settings = { volume: 1, shadow: 'high', muted: false };
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (_) { /* 隐私模式等 */ }
+function persistSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) {} }
+let paused = false;
+
 // ---------- 基础场景 ----------
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -1251,14 +1259,15 @@ const joy = { x: 0, y: 0, active: false };
 }
 
 // ---------- 音频 ----------
-let audioCtx = null, masterGain = null, muted = false;
+let audioCtx = null, masterGain = null, muted = !!settings.muted;
+function applyVolume() { if (masterGain) masterGain.gain.value = muted ? 0 : 0.5 * settings.volume; }
 const PENTA = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
 function startAudio() {
   if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = muted ? 0 : 0.5;
+    applyVolume();
     masterGain.connect(audioCtx.destination);
     [130.81, 196.0].forEach((f, i) => {
       const osc = audioCtx.createOscillator();
@@ -1308,12 +1317,51 @@ function playChime() {
   [659.25, 783.99, 1046.5].forEach((f, i) => setTimeout(() => playNote(f, 0.12, 1.4), i * 90));
 }
 const muteBtn = document.getElementById('mute-btn');
+muteBtn.textContent = muted ? '🔇' : '🔊';
 muteBtn.addEventListener('click', () => {
   muted = !muted;
+  settings.muted = muted;
+  persistSettings();
   muteBtn.textContent = muted ? '🔇' : '🔊';
-  if (masterGain) masterGain.gain.value = muted ? 0 : 0.5;
+  applyVolume();
   startAudio();
 });
+
+// ---------- 设置面板（暂停 / 音量 / 阴影 / 重新开始） ----------
+const settingsOverlay = document.getElementById('settings-overlay');
+function setPaused(p) {
+  paused = p;
+  settingsOverlay.classList.toggle('open', p);
+}
+document.getElementById('settings-btn').addEventListener('click', () => setPaused(!paused));
+document.getElementById('set-resume').addEventListener('click', () => setPaused(false));
+document.getElementById('set-restart').addEventListener('click', () => {
+  if (confirm('从头开始新的一天？当前进度将清除。')) {
+    window.__hardReset ? window.__hardReset() : location.reload();
+  }
+});
+const volEl = document.getElementById('set-volume');
+volEl.value = String(Math.round(settings.volume * 100));
+volEl.addEventListener('input', () => {
+  settings.volume = volEl.value / 100;
+  applyVolume();
+  persistSettings();
+});
+function applyShadowQuality() {
+  const hi = settings.shadow === 'high' && !IS_TOUCH;
+  const sz = hi ? 2048 : 1024;
+  sun.shadow.mapSize.set(sz, sz);
+  if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+}
+const shadowEl = document.getElementById('set-shadow');
+shadowEl.value = settings.shadow;
+shadowEl.addEventListener('change', () => {
+  settings.shadow = shadowEl.value;
+  applyShadowQuality();
+  persistSettings();
+});
+applyShadowQuality();
+window.addEventListener('keydown', (e) => { if (e.code === 'Escape') setPaused(!paused); });
 
 // ---------- HUD ----------
 const toastEl = document.getElementById('toast');
@@ -1360,6 +1408,7 @@ function collectOrb(orb) {
   showToast(`✨ <b style="color:#b56576">Chole 说：</b>${CHOLE_MESSAGES[orb.userData.index]}`);
   addHappiness(2);
   questEvent('collect');
+  saveGame();
 }
 
 // ============================================================
@@ -1376,7 +1425,7 @@ const HAPPY_LINES = {
   100: '满了。整座城的幸福像一杯到了杯沿也舍不得溢出的蜜。而这一切的开头，是那个黎明落在云上的你。',
 };
 const happyMilestones = new Set();
-function addHappiness(n) {
+function addHappiness(n, silent = false) {
   const before = happiness;
   happiness = Math.min(100, happiness + n);
   if (happyFill) happyFill.style.width = happiness + '%';
@@ -1384,8 +1433,8 @@ function addHappiness(n) {
   for (const th of [25, 50, 75, 100]) {
     if (before < th && happiness >= th && !happyMilestones.has(th)) {
       happyMilestones.add(th);
-      showStory(HAPPY_LINES[th]);
-      launchFirework(player.position.x + rand(-15, 15), player.position.z - 20, null, th === 100);
+      if (!silent) showStory(HAPPY_LINES[th]);
+      if (!silent) launchFirework(player.position.x + rand(-15, 15), player.position.z - 20, null, th === 100);
       if (th === 25) { for (let i = 0; i < 3; i++) spawnBird(); }
       if (th === 50) plazaBloom();
       if (th === 75) { happyBloomBoost = 0.12; fireflyBoost = 1.5; }
@@ -1587,8 +1636,30 @@ function cleanupObjective(q) {
   if (visitBeacon) { scene.remove(visitBeacon); visitBeacon = null; }
 }
 
+// ---------- 存档（章节检查点：完成一章 / 收集一光即存） ----------
+let journeyDone = false;
+let suppressSave = false; // 重新开始时置位，防止 beforeunload 兜底保存把刚清掉的进度写回去
+function saveGame() {
+  if (suppressSave) return;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      v: 1,
+      t: +TIME.t.toFixed(4),
+      quest: pendingQuest ? pendingQuest.i : questIdx,
+      done: journeyDone,
+      collected: orbs.filter(o => o.userData.collected).map(o => o.userData.index),
+      happiness: Math.round(happiness),
+    }));
+  } catch (_) { /* 存储不可用时静默降级 */ }
+}
+window.__hardReset = () => {
+  suppressSave = true;
+  try { localStorage.removeItem(SAVE_KEY); } catch (_) {}
+  location.reload();
+};
+
 function startQuest(i) {
-  if (i >= QUESTS.length) { questIdx = -1; updateQuestHUD(); return; }
+  if (i >= QUESTS.length) { journeyDone = true; questIdx = -1; updateQuestHUD(); saveGame(); return; }
   questIdx = i; questProg = 0;
   const q = QUESTS[i];
   if (q.timeHint) timelapseTo(q.timeHint);
@@ -1622,6 +1693,7 @@ function completeQuest() {
     [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => setTimeout(() => playNote(f, 0.12, 2.2), i * 160));
   }
   pendingQuest = { i: next, at: simTime + 6 };
+  saveGame();
 }
 
 // ---------- 天灯节 ----------
@@ -1664,11 +1736,38 @@ function dropFootFlower() {
 // ---------- 流星（星夜限定的小确幸） ----------
 let meteor = null, meteorCd = 25;
 
-// ---------- 开场 ----------
+// ---------- 开场（有存档则从章节检查点继续） ----------
+let restoredSave = null;
+try { restoredSave = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (_) {}
 setTimeout(() => {
   document.getElementById('loading').classList.add('hidden');
-  setTimeout(() => startQuest(0), 900);
+  if (restoredSave && restoredSave.v === 1) {
+    TIME.t = ((restoredSave.t % 1) + 1) % 1;
+    for (const idx of restoredSave.collected || []) {
+      const orb = orbs[idx];
+      if (orb && !orb.userData.collected) {
+        orb.userData.collected = true;
+        orb.visible = false;
+        collected++;
+      }
+    }
+    orbCountEl.textContent = String(collected);
+    addHappiness(restoredSave.happiness || 0, true);
+    if (restoredSave.done || restoredSave.quest >= QUESTS.length) {
+      journeyDone = true;
+      rainbow.visible = true;
+      showStory('欢迎回来，我的孩子。城和彩虹，都在原地等你。');
+    } else {
+      showStory('欢迎回来，小旅人。我们接着走这一天。');
+      setTimeout(() => startQuest(Math.max(0, restoredSave.quest | 0)), 1800);
+    }
+  } else {
+    setTimeout(() => startQuest(0), 900);
+  }
 }, 600);
+// 切后台 / 关页前兜底保存
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
+window.addEventListener('beforeunload', saveGame);
 
 // ---------- 主循环 ----------
 const clock = new THREE.Clock();
@@ -1688,6 +1787,12 @@ camera.lookAt(player.position.x, player.position.y + 2.0, player.position.z);
 
 function tick(forcedDt) {
   lastTickMs = performance.now();
+  if (paused && forcedDt === undefined) {
+    clock.getDelta(); // 暂停时丢弃流逝的时间，恢复时不会跳帧
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
+    return;
+  }
   const rawDt = clock.getDelta();
   const dt = forcedDt ?? Math.min(rawDt, 0.05);
   const t = clock.elapsedTime;
@@ -2353,6 +2458,15 @@ window.__game = {
   get fireworkCount() { return fireworks.length; },
   lampsLit() { return lamps.filter(l => l.lit).length; },
   get orbsActive() { return orbsActive; },
+  // —— 存档 / 暂停 / 设置（Steam 化基建） ——
+  get paused() { return paused; },
+  get journeyDone() { return journeyDone; },
+  saveNow() { saveGame(); },
+  clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (_) {} },
+  hardReset() { window.__hardReset(); },
+  savedState() { try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (_) { return null; } },
+  setPausedCheat(p) { setPaused(p); },
+  get settingsState() { return { ...settings }; },
   lampTargetPositions() { return (questState.lampTargets || []).filter(l => !l.lit).map(l => [l.x, l.z]); },
   letterInfo() {
     const tv = villagers[LETTER_TARGETS[questState.letterIdx % LETTER_TARGETS.length]];
